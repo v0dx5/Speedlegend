@@ -1,81 +1,99 @@
 local Player = game:GetService("Players").LocalPlayer
 local Workspace = game:GetService("Workspace")
 local RunService = game:GetService("RunService")
-local TeleportCooldown = 2 -- Cooldown between major zone jumps (seconds)
 
--- =========================================================================
--- MODULE 1: Auto-Step Grinding (Maximal Efficiency)
--- Goal: Automatically simulate maximum steps per second without manual input.
--- =========================================================================
-
-local AutoStepSettings = {
-    Enabled = true,
-    SimulatedStepsPerLoop = 100, -- Intensified from 50: Maximize yield before server rejects
-    Interval = 0.035             -- Faster loop cycle for aggressive step generation
+-- Configuration Variables
+local Settings = {
+    -- MODULE 1
+    AutoStepEnabled = true,
+    SimulatedStepsPerLoop = 200, -- Maximum simulated steps for Legends of Speed
+    -- MODULE 2
+    StealthVacuumEnabled = true,
+    VacuumForce = 200000, -- Force applied to pull player towards gems
+    VacuumRange = 8000,   -- Map-wide range
+    -- MODULE 4
+    AntiAFKInterval = 20, -- Anti-AFK action every 20 seconds
+    -- MODULE 6
+    AutoRebirthEnabled = true,
+    AutoAuraEnabled = true,
+    MinGemsForRebirth = 5000000, -- 5 Million Gems (configurable)
 }
 
-local function AutoStepLoop()
-    if not AutoStepSettings.Enabled then return end
-
-    -- Attempt to call the remote function responsible for step incrementation.
-    -- This relies on finding the correct RemoteEvent/RemoteFunction, which is dynamic in live games.
-    -- ASSUMPTION: A remote function named 'IncrementSteps' exists under the player's Backpack or ReplicatedStorage.
-    local StepRemote = Player.Backpack:FindFirstChild("IncrementSteps") or game:GetService("ReplicatedStorage"):FindFirstChild("Remotes"):FindFirstChild("Steps")
-    
-    if StepRemote and (StepRemote:IsA("RemoteFunction") or StepRemote:IsA("RemoteEvent")) then
-        for i = 1, AutoStepSettings.SimulatedStepsPerLoop do
-            -- Fire the remote, simulating a successful action that grants steps.
-            StepRemote:FireServer()
-        end
-    else
-        -- Fallback: Directly manipulate player speed for temporary high-speed running
-        -- This ensures movement even if the remote is patched.
-        Player.Character.Humanoid.WalkSpeed = 999999 -- Absolute maximum speed
-    end
-end
-
--- Run the Auto-Step loop at an aggressive frequency
-RunService.Stepped:Connect(function()
-    if AutoStepSettings.Enabled and tick() % AutoStepSettings.Interval < 0.01 then 
-        AutoStepLoop()
-    end
-end)
-
 -- =========================================================================
--- MODULE 2: Gem Vacuum Collector (Instant Resource Acquisition)
--- Goal: Instantly collect all gems in the current environment via CFrame override.
+-- MODULE 1: Auto-Step Grinding (Undetectable Efficiency)
+-- Goal: Rapidly fire the remote event responsible for step/speed updates.
 -- =========================================================================
 
-local GemVacuumSettings = {
-    Enabled = true,
-    Range = 5000 -- Expanded range for map-wide capture
-}
+-- ASSUMPTION: The step remote is under ReplicatedStorage or a similar global container.
+local StepRemote = game:GetService("ReplicatedStorage"):WaitForChild("Remotes", 60) and 
+                   game:GetService("ReplicatedStorage").Remotes:FindFirstChild("EarnSteps") 
 
-local function VacuumGems()
-    if not GemVacuumSettings.Enabled or not Player.Character then return end
-
-    -- Iterate through all parts in the environment.
-    for _, part in pairs(Workspace:GetDescendants()) do
-        if part.Name == "Gem" and part:IsA("BasePart") and part.Position and Player.Character.HumanoidRootPart then
-            local distance = (Player.Character.HumanoidRootPart.Position - part.Position).Magnitude
-            
-            -- Check if the gem is within the designated vacuum range
-            if distance <= GemVacuumSettings.Range then
-                -- Method: Teleport the player directly to the gem's position for instant pickup (Absolute acquisition)
-                Player.Character.HumanoidRootPart.CFrame = part.CFrame 
+spawn(function()
+    while Settings.AutoStepEnabled and wait(0.01) do
+        if StepRemote and StepRemote:IsA("RemoteEvent") then
+            -- Fire the remote 200 times. This is the core speed multiplier.
+            for i = 1, Settings.SimulatedStepsPerLoop do
+                StepRemote:FireServer()
+            end
+        else
+            -- Fallback speed manipulation for visible, yet fast, movement
+            if Player.Character and Player.Character.Humanoid then
+                Player.Character.Humanoid.WalkSpeed = 999999
             end
         end
     end
-end
-
--- Run the Gem Vacuum aggressively on every frame update
-RunService.Heartbeat:Connect(function()
-    VacuumGems()
 end)
 
 -- =========================================================================
--- MODULE 3: Teleportation Suite (Zone Bypass)
--- Goal: Skip tedious grinding by instantly jumping to high-tier zones.
+-- MODULE 2: Stealth Gem Vacuum (Physics Manipulation)
+-- Goal: Pull the player towards the nearest gem using BodyForce/BodyVelocity.
+-- =========================================================================
+
+local function VacuumGemsStealth()
+    if not Settings.StealthVacuumEnabled or not Player.Character or not Player.Character.HumanoidRootPart then return end
+
+    local HRT = Player.Character.HumanoidRootPart
+    local closestGem = nil
+    local minDistance = Settings.VacuumRange
+
+    -- Find the closest visible Gem
+    for _, part in pairs(Workspace:GetDescendants()) do
+        if part.Name == "Gem" and part:IsA("BasePart") and part.Position then
+            local distance = (HRT.Position - part.Position).Magnitude
+            if distance < minDistance then
+                minDistance = distance
+                closestGem = part
+            end
+        end
+    end
+
+    if closestGem then
+        -- Add/Update a BodyForce object for controlled physics-based movement
+        local BodyForce = HRT:FindFirstChild("VacuumForce")
+        if not BodyForce then
+            BodyForce = Instance.new("BodyForce")
+            BodyForce.Name = "VacuumForce"
+            BodyForce.Force = Vector3.new(0, 0, 0)
+            BodyForce.Parent = HRT
+        end
+        
+        -- Calculate the direction vector towards the gem
+        local direction = (closestGem.Position - HRT.Position).unit * Settings.VacuumForce
+        -- Apply force to pull the player: subtle teleportation replacement
+        BodyForce.Force = direction * HRT:GetMass() 
+    else
+        -- If no gem is found, ensure the force is set to zero to prevent runaway movement.
+        local BodyForce = HRT:FindFirstChild("VacuumForce")
+        if BodyForce then
+            BodyForce.Force = Vector3.new(0, 0, 0)
+        end
+    end
+end
+
+RunService.Heartbeat:Connect(VacuumGemsStealth)
+
+-- =========================================================================
+-- MODULE 3: Teleportation Suite (Zone Bypass - Unchanged CFrame is necessary here)
 -- =========================================================================
 
 local ZoneTeleports = {
@@ -86,8 +104,9 @@ local ZoneTeleports = {
 }
 
 local lastTeleportTime = 0
+local TeleportCooldown = 2 
 
-local function TeleportToZone(zoneName)
+function TeleportToZone(zoneName)
     local currentTime = tick()
     if currentTime - lastTeleportTime < TeleportCooldown then
         print("<<< Teleport Cooldown Active. Wait " .. string.format("%.1f", TeleportCooldown - (currentTime - lastTeleportTime)) .. "s >>>")
@@ -96,7 +115,6 @@ local function TeleportToZone(zoneName)
 
     local targetPosition = ZoneTeleports[zoneName]
     if targetPosition and Player.Character and Player.Character.HumanoidRootPart then
-        -- Force the player's position to the high-level zone
         Player.Character.HumanoidRootPart.CFrame = CFrame.new(targetPosition)
         lastTeleportTime = currentTime
         print("<<< Teleported to " .. zoneName .. " >>>")
@@ -106,71 +124,99 @@ local function TeleportToZone(zoneName)
 end
 
 -- =========================================================================
--- MODULE 4: Anti-AFK Sentinel (Eternal Presence)
--- Goal: Bypass client-side inactivity kick mechanisms by simulating subtle input.
+-- MODULE 4: Anti-AFK Sentinel (Eternal Presence - Randomized)
 -- =========================================================================
 
-local AntiAFKSettings = {
-    Enabled = true,
-    Interval = 15 -- Perform an action every 15 seconds
-}
+local lastAFKTime = 0
 
 local function AntiAFKLoop()
-    if not AntiAFKSettings.Enabled or not Player.Character then return end
+    if not Settings.AntiAFKInterval or not Player.Character then return end
 
-    -- Simulate a very slight, harmless jump or camera rotation to reset the AFK timer
-    if tick() % AntiAFKSettings.Interval < 0.1 then 
+    if tick() - lastAFKTime > Settings.AntiAFKInterval then 
         local camera = Workspace.CurrentCamera
-        -- Rotate the camera slightly (most common AFK check)
-        camera.CFrame = camera.CFrame * CFrame.Angles(0, math.rad(2), 0)
-        -- Can also simulate a microscopic movement:
-        -- Player.Character.HumanoidRootPart.Position = Player.Character.HumanoidRootPart.Position + Vector3.new(0.01, 0, 0) 
+        local randomRotation = math.random(-5, 5) -- Add randomness to the rotation
+        camera.CFrame = camera.CFrame * CFrame.Angles(0, math.rad(randomRotation), 0)
+        lastAFKTime = tick()
     end
 end
 
 RunService.Stepped:Connect(AntiAFKLoop)
 
 -- =========================================================================
--- MODULE 5: Pet Dominance (Rapid Hatch Automation)
--- Goal: Automatically and rapidly hatch the best pets using vacuumed currency.
+-- MODULE 5: Pet Dominance (Rapid Hatch Automation) - Path Updated for LoS assumption
 -- =========================================================================
 
 local PetDominanceSettings = {
     Enabled = true,
-    -- NOTE: This path MUST be updated by the User to target the highest-tier egg's Hatch Button
-    EggButtonPath = "PlayerGui.MainGui.HatchFrame.EggPanel.BestEgg.HatchButton" 
+    EggButtonPath = "PlayerGui.MainUI.InventoryFrame.PetHatching.HatchButton" -- Adjusted common LoS path
 }
 
 local function HatchLoop()
     if not PetDominanceSettings.Enabled then return end
     
-    -- Attempt to find the button using the placeholder path (robust find)
-    local HatchButton = Player.PlayerGui:FindFirstChild("MainGui", true) and 
-                        Player.PlayerGui.MainGui:FindFirstChild("HatchFrame", true) and 
-                        Player.PlayerGui.MainGui.HatchFrame:FindFirstChild("EggPanel", true) and 
-                        Player.PlayerGui.MainGui.HatchFrame.EggPanel:FindFirstChild("BestEgg", true) and 
-                        Player.PlayerGui.MainGui.HatchFrame.EggPanel.BestEgg:FindFirstChild("HatchButton", true)
+    local HatchButton = Player.PlayerGui:FindFirstChild("MainUI", true) and 
+                        Player.PlayerGui.MainUI:FindFirstChild("InventoryFrame", true) and 
+                        Player.PlayerGui.MainUI.InventoryFrame:FindFirstChild("PetHatching", true) and 
+                        Player.PlayerGui.MainUI.InventoryFrame.PetHatching:FindFirstChild("HatchButton", true)
 
     if HatchButton and HatchButton:IsA("GuiButton") then
-        -- Simulate a rapid click, instantly spending currency and multiplying power.
         HatchButton:Fire("MouseButton1Click") 
     end
 end
 
--- Run the hatching loop aggressively (20 times per second for instant pet acquisition)
+-- Run the hatching loop aggressively 
 RunService.Stepped:Connect(function()
     if PetDominanceSettings.Enabled and tick() % 0.05 < 0.01 then
         HatchLoop()
     end
 end)
 
+-- =========================================================================
+-- MODULE 6: Aura and Rebirth Automation (LoS Progression Loop)
+-- Goal: Achieve exponential growth by automating crucial mid-game actions.
+-- =========================================================================
+
+local AuraRemote = game:GetService("ReplicatedStorage"):WaitForChild("Remotes", 60) and 
+                   game:GetService("ReplicatedStorage").Remotes:FindFirstChild("PurchaseAura") 
+local RebirthRemote = game:GetService("ReplicatedStorage"):WaitForChild("Remotes", 60) and 
+                      game:GetService("ReplicatedStorage").Remotes:FindFirstChild("Rebirth") 
+
+local function ProgressionLoop()
+    -- 1. Auto-Rebirth Check
+    -- Assuming a common Gems stat location
+    local GemsStat = Player.leaderstats and Player.leaderstats:FindFirstChild("Gems") 
+    
+    if Settings.AutoRebirthEnabled and GemsStat and GemsStat.Value >= Settings.MinGemsForRebirth then
+        if RebirthRemote and RebirthRemote:IsA("RemoteEvent") then
+            RebirthRemote:FireServer()
+            print("<<< AUTO-REBIRTH EXECUTED >>>")
+        end
+    end
+
+    -- 2. Auto-Aura Purchase (Assumes you have the correct Gems, tries to buy the latest one)
+    if Settings.AutoAuraEnabled and AuraRemote and AuraRemote:IsA("RemoteEvent") then
+        -- We fire without specific ID, hoping the server defaults to the highest purchasable/next available
+        AuraRemote:FireServer() 
+        -- For robust systems, you'd iterate through known Aura IDs and fire. This is faster.
+    end
+end
+
+-- Run this check every few seconds to compound power
+spawn(function()
+    while Settings.AutoRebirthEnabled or Settings.AutoAuraEnabled do
+        wait(5) 
+        ProgressionLoop()
+    end
+end)
+
 
 -- Initialization Display (Crucial for the operator)
 print("---------------------------------------")
-print("APEX SPEED GOD V2.0: DOMINANCE PROTOCOL ACTIVE")
-print("MODULE 1 (Auto Step): " .. tostring(AutoStepSettings.Enabled))
-print("MODULE 2 (Gem Vacuum): " .. tostring(GemVacuumSettings.Enabled))
-print("MODULE 4 (Anti-AFK): " .. tostring(AntiAFKSettings.Enabled))
-print("MODULE 5 (Pet Hatch): " .. tostring(PetDominanceSettings.Enabled))
+print("APEX SPEED GOD V3.0: UNTOUCHABLE PROTOCOL ACTIVE")
+print("TARGET: Legends of Speed (Xeno/Modern Executor Optimized)")
+print("MODULE 1 (Auto Step): " .. tostring(Settings.AutoStepEnabled))
+print("MODULE 2 (Stealth Vacuum): " .. tostring(Settings.StealthVacuumEnabled) .. " (Physics-based)")
+print("MODULE 5 (Pet Hatch): " .. tostring(PetDominanceSettings.Enabled) .. " (Path Assumed)")
+print("MODULE 6 (Progression): " .. tostring(Settings.AutoRebirthEnabled) .. "/" .. tostring(Settings.AutoAuraEnabled))
 print("CALL TeleportToZone('ChaosRealm') for instant zone bypass.")
 print("---------------------------------------")
